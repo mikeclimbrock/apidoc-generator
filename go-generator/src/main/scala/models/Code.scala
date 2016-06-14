@@ -428,7 +428,10 @@ case class Code(form: InvocationForm) {
                     Some(
                       Seq(
                         s"case $value:",
-                        s"return ${resultsType.name}{StatusCode: resp.StatusCode, Response: resp$responseCode}".indent(1)
+                        if(!responseType.name.toLowerCase.contains("v2"))
+                          s"return ${resultsType.name}{StatusCode: resp.StatusCode, Response: resp$responseCode}".indent(1)
+                        else
+                          s"return ${resultsType.name}{StatusCode: resp.StatusCode, Response: resp.Response$responseCode}".indent(1)
                       ).mkString("\n")
                     )
                   }
@@ -437,7 +440,10 @@ case class Code(form: InvocationForm) {
                     Some(
                       Seq(
                         s"case $value:",
-                        s"return ${resultsType.name}{StatusCode: resp.StatusCode, Response: resp}".indent(1)
+                        if(!resultsType.name.toLowerCase.contains("v2"))
+                          s"return ${resultsType.name}{StatusCode: resp.StatusCode, Response: resp}".indent(1)
+                        else
+                          s"return ${resultsType.name}{StatusCode: resp.StatusCode, Response: resp.Response}".indent(1)
                       ).mkString("\n")
                     )
                   }
@@ -458,7 +464,10 @@ case class Code(form: InvocationForm) {
           } ++ Seq(
             Seq(
               "default:",
-              s"return ${resultsType.name}{StatusCode: resp.StatusCode, Response: resp, Error: ${errors}.New(resp.Status)}".indent(1)
+              if(!resultsType.name.toLowerCase.contains("v2"))
+                s"return ${resultsType.name}{StatusCode: resp.StatusCode, Response: resp, Error: ${errors}.New(resp.Status)}".indent(1)
+              else
+                s"return ${resultsType.name}{StatusCode: resp.StatusCode, Response: resp.Response, Error: ${errors}.New(resp.Status)}".indent(1)
             ).mkString("\n")
           )
         ).mkString("\n\n"),
@@ -505,7 +514,7 @@ case class Code(form: InvocationForm) {
         s"${argsTypeCode}${responseTypeCode}func $functionName(${methodParameters.mkString(", ")}) ${resultsType.name} {",
 
         Seq(
-          Some(s"""requestUrl := ${fmt}.Sprintf("%s$path", ${pathArgs.mkString(", ")})"""),
+          Some(s"""requestUrl := ${fmt}.Sprintf("%s$path/", ${pathArgs.mkString(", ")})"""),
           bodyString,
           queryString,
           formString,
@@ -513,14 +522,17 @@ case class Code(form: InvocationForm) {
         ).flatten.mkString("\n").indent(1),
 
         Seq(
-          s"""request, err := buildRequest(client, "${op.method}", requestUrl$bodyParam)""",
+          if(!path.contains("v2"))
+            s"""request, err := buildRequest(client, "${op.method}", requestUrl$bodyParam)"""
+          else
+            s"""request, err := buildRequestWithAuthToken(client, "${op.method}", requestUrl$bodyParam)""",
           s"if err != nil {",
           s"return ${resultsType.name}{Error: err}".indent(1),
           s"}"
         ).mkString("\n").indent(1),
 
         Seq(
-          s"resp, err := client.HttpClient.Do(request)",
+          s"resp, err := request.Get(requestUrl, nil)",
           s"if err != nil {",
           s"return ${resultsType.name}{Error: err}".indent(1),
           s"}",
@@ -602,6 +614,7 @@ type Client struct {
 	Username   string
 	Password   string
 	BaseUrl    string
+  JwtToken   string
 }
     """.trim)
       }
@@ -637,6 +650,7 @@ type ClientRequestBody struct {
         }
 
         val http = importBuilder.ensureImport("net/http")
+        val httpWrapper = importBuilder.ensureImport("github.com/ddliu/go-httpclient")
         Some(
 
           Seq(
@@ -684,8 +698,46 @@ type ClientRequestBody struct {
               Some("return request, nil")
             ).flatten.mkString("\n\n").indent(1),
 
-            "}"
+            "}",
 
+            s"func buildRequestWithAuthToken(client Client, method, urlStr string$bodyArg) (*${httpWrapper}.HttpClient, error) {",
+
+            Seq(
+              Some(
+                Seq(
+                  """if client.JwtToken != "" {""",
+                  "jwtToken := s\"Bearer ${client.JwtToken}\"".indent(1),
+                  "}",
+                  """else {""",
+                  "jwtToken := \"\"".indent(1),
+                  "}"
+                ).mkString("\n")
+              ),
+
+              Some(
+                Seq(
+                  "request := httpclient.",
+                  headers.all.map {
+                    case (name, value) => s""""WithHeader($name", $value).""".indent(1)
+                  }.mkString("\n").reverse.replaceFirst("\\.", "").reverse.table()
+                ).mkString("\n")
+              ),
+
+              hasClientBody match {
+                case false => None
+                case true => Some(
+                  Seq(
+                    """if body.contentType != "" {""",
+                    """request.WithHeader("Content-type", body.contentType)""".indent(1),
+                    "}"
+                  ).mkString("\n")
+                )
+              },
+
+              Some("return request, nil")
+            ).flatten.mkString("\n\n").indent(1),
+
+            "}"
           ).mkString("\n\n")
         )
       }
