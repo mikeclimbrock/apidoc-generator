@@ -142,28 +142,53 @@ case class Play2Json(
   }
 
   private[this] def readersWithDiscriminator(union: ScalaUnion, discriminator: String): String = {
-    Seq(
-      s"${play2JsonCommon.implicitReaderDef(union.name)} = new play.api.libs.json.Reads[${union.name}] {",
-      Seq(s"def reads(js: play.api.libs.json.JsValue): play.api.libs.json.JsResult[${union.name}] = {",
-        Seq(s"""(js \\ "$discriminator").validate[String] match {""",
-          Seq(
-            """case play.api.libs.json.JsError(msg) => play.api.libs.json.JsError(msg)""",
-            """case play.api.libs.json.JsSuccess(discriminator, _) => {""",
-            Seq(
-              """discriminator match {""",
-              unionTypesWithNames(union).map { case (t, typeName) =>
-                s"""case "${t.originalName}" => js.validate[$typeName]"""
-              }.mkString("\n").indent(2),
-              s"""case other => play.api.libs.json.JsSuccess(${union.undefinedType.fullName}(other))""".indent(2),
+    union.default match {
+      case Some(_) =>
+        val className = s"${union.name}${underscoreToInitCap(discriminator)}"
+
+        Seq(
+          s"${play2JsonCommon.implicitReaderDef(union.name)} = new play.api.libs.json.Reads[${union.name}] {",
+          Seq(s"def reads(js: play.api.libs.json.JsValue): play.api.libs.json.JsResult[${union.name}] = {",
+            Seq(s"""(js \\ "$discriminator").asOpt[String].getOrElse { $className.default.toString } match {""",
+              Seq(
+                buildUnionDiscriminatorCaseMatchers(union)
+              ).mkString("\n").indent(2),
               "}"
             ).mkString("\n").indent(2),
             "}"
           ).mkString("\n").indent(2),
           "}"
-        ).mkString("\n").indent(2),
-        "}"
-      ).mkString("\n").indent(2),
-      "}"
+        ).mkString("\n")
+      case None =>
+        Seq(
+          s"${play2JsonCommon.implicitReaderDef(union.name)} = new play.api.libs.json.Reads[${union.name}] {",
+          Seq(s"def reads(js: play.api.libs.json.JsValue): play.api.libs.json.JsResult[${union.name}] = {",
+            Seq(s"""(js \\ "$discriminator").validate[String] match {""",
+              Seq(
+                """case play.api.libs.json.JsError(msg) => play.api.libs.json.JsError(msg)""",
+                """case play.api.libs.json.JsSuccess(discriminator, _) => {""",
+                Seq(
+                  """discriminator match {""",
+                  buildUnionDiscriminatorCaseMatchers(union),
+                  "}"
+                ).mkString("\n").indent(2),
+                "}"
+              ).mkString("\n").indent(2),
+              "}"
+            ).mkString("\n").indent(2),
+            "}"
+          ).mkString("\n").indent(2),
+          "}"
+        ).mkString("\n")
+    }
+  }
+
+  private[models] def buildUnionDiscriminatorCaseMatchers(union: ScalaUnion): String = {
+    Seq(
+      unionTypesWithNames(union).map { case (t, typeName) =>
+        s"""case "${t.originalName}" => js.validate[$typeName]"""
+      }.mkString("\n").indent(2),
+      s"""case other => play.api.libs.json.JsSuccess(${union.undefinedType.fullName}(other))""".indent(2)
     ).mkString("\n")
   }
 

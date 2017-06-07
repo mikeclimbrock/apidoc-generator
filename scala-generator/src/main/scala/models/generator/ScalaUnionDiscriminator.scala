@@ -9,6 +9,12 @@ case class ScalaUnionDiscriminator(
     sys.error(s"ScalaUnionDiscriminator requires a discriminator - union[${union.name}] does not have one defined")
   }
 
+  val defaultDiscriminator = union.default.map { default =>
+    union.types.find(_.datatype.name == default).getOrElse {
+      sys.error(s"ScalaUnionDefaultDiscriminator default discriminator must match a union type name - union type name[$default] is not defined")
+    }.datatype.name
+  }
+
   private[this] val className = s"${union.name}${underscoreToInitCap(discriminator)}"
 
   def build(): String = {
@@ -36,7 +42,11 @@ case class ScalaUnionDiscriminator(
       s"val all = Seq(" + union.types.map(_.name).mkString(", ") + ")",
       s"private[this] val byName = all.map(x => x.toString.toLowerCase -> x).toMap",
       s"def apply(value: String): $className = fromString(value).getOrElse(UNDEFINED(value))",
-      s"def fromString(value: String): _root_.scala.Option[$className] = byName.get(value.toLowerCase)"
+      s"def fromString(value: String): _root_.scala.Option[$className] = byName.get(value.toLowerCase)",
+      s"def default: _root_.scala.Option[$className] = " +
+        s"${defaultDiscriminator.map { default =>
+          s"""Some($className("$default"))"""
+        }.getOrElse("None")}"
     ).mkString("\n\n")
   }
 

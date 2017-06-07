@@ -79,6 +79,8 @@ class ScalaUnion(val ssd: ScalaService, val union: Union) {
 
   val deprecation: Option[Deprecation] = union.deprecation
 
+  val default: Option[String] = union.discriminator //union.default
+
 }
 
 /*
